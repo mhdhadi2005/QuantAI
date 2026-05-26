@@ -1,0 +1,41 @@
+# Autonomous AI Trading System - Docker Compose
+version: '3.9'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: trading-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=sqlite:///./trading_system.db
+      - TRADING_MODE=paper_sim
+      - INITIAL_CAPITAL=1000.0
+    volumes:
+      - ./backend:/app
+      - trading-data:/app/trading_system.db
+    restart: unless-stopped
+    networks:
+      - trading-net
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: trading-frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - trading-net
+
+volumes:
+  trading-data:
+
+networks:
+  trading-net:
+    driver: bridge
