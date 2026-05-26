@@ -142,6 +142,8 @@ backend/trading_system.db
 backend/trading_system.db-journal
 *.db
 *.sqlite
+*.db-shm
+*.db-wal
 
 # AI Models & Saves
 backend/models_saved/
