@@ -56,11 +56,87 @@ def reset_daily_stats(db: Session, portfolio: Portfolio):
     db.commit()
 
 
+def check_and_apply_auto_market_switch() -> tuple:
+    """
+    Checks if Indian or US markets are open and switches trading mode & symbols dynamically.
+    Returns: (switched: bool, target_mode: str)
+    """
+    import datetime
+    import pytz
+    from app.notifications import send_telegram_message
+
+    now_utc = datetime.datetime.utcnow().replace(tzinfo=pytz.utc)
+    
+    # Check Indian Market Hours (9:15 AM to 3:30 PM IST / UTC+5:30)
+    ist_tz = pytz.timezone('Asia/Kolkata')
+    now_ist = now_utc.astimezone(ist_tz)
+    
+    # Check US Market Hours (9:30 AM to 4:00 PM EST/EDT)
+    us_tz = pytz.timezone('America/New_York')
+    now_us = now_utc.astimezone(us_tz)
+
+    is_india_open = False
+    is_us_open = False
+
+    # IST Trading: Monday-Friday 09:15 to 15:30
+    if now_ist.weekday() < 5:
+        ist_time = now_ist.time()
+        if datetime.time(9, 15) <= ist_time <= datetime.time(15, 30):
+            is_india_open = True
+
+    # US Trading: Monday-Friday 09:30 to 16:00
+    if now_us.weekday() < 5:
+        us_time = now_us.time()
+        if datetime.time(9, 30) <= us_time <= datetime.time(16, 0):
+            is_us_open = True
+
+    if is_india_open:
+        target_mode = "paper_sim"
+        target_symbols = "RELIANCE.NS,TCS.NS,HDFCBANK.NS,INFY.NS,ICICIBANK.NS,^NSEI"
+        market_label = "🇮🇳 Indian NSE Market"
+    elif is_us_open:
+        target_mode = "paper_alpaca"
+        target_symbols = "AAPL,MSFT,NVDA,SPY,QQQ,TSLA,AMZN,GOOGL,META,AMD,NFLX,JPM,V,DIS"
+        market_label = "🇺🇸 US Market"
+    else:
+        return False, "closed"
+
+    if settings.TRADING_MODE != target_mode or settings.DEFAULT_SYMBOLS != target_symbols:
+        logger.info(f"Auto-switching market to {market_label}: Mode {settings.TRADING_MODE} -> {target_mode}, Symbols -> {target_symbols}")
+        settings.TRADING_MODE = target_mode
+        settings.DEFAULT_SYMBOLS = target_symbols
+        
+        # Send update to Telegram
+        msg = (
+            f"🔄 *Market Auto-Switch Triggered*\n"
+            f"───────────────────\n"
+            f"☀️ Active Market: *{market_label}* (Open)\n"
+            f"🔌 Trading Mode: `{target_mode}`\n"
+            f"📈 Symbols: `{target_symbols}`\n"
+            f"🚀 QuantAI is now active in this market!"
+        )
+        try:
+            send_telegram_message(msg)
+        except Exception as e:
+            logger.error(f"Error sending auto-switch Telegram update: {e}")
+        return True, target_mode
+
+    return False, target_mode
+
+
 def run_trading_cycle(symbols: List[str] = None) -> dict:
     """
     Execute a full trading cycle for all configured symbols.
     Called by the scheduler on each tick.
     """
+    # Check and apply auto-switch logic before resolving settings
+    try:
+        switched, active_mode = check_and_apply_auto_market_switch()
+        if switched:
+            logger.info(f"Market context auto-switched to mode: {active_mode}")
+    except Exception as e:
+        logger.error(f"Failed to check/apply auto market switch: {e}")
+
     symbols = symbols or settings.symbols_list
     db = SessionLocal()
     broker = get_broker()
