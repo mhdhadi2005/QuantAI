@@ -220,9 +220,9 @@ def _process_symbol(db: Session, portfolio: Portfolio, broker, symbol: str) -> d
         if predictor.is_trained:
             accuracy = predictor.model_metrics.get("accuracy", 0.0)
             if accuracy < 0.50:
-                logger.info(f"Skipping symbol {symbol} - Model accuracy too low ({accuracy:.1%})")
-                return {"status": "low_accuracy_skipped", "symbol": symbol, "accuracy": accuracy}
-            ai_pred = predictor.predict(df)
+                logger.info(f"AI Model accuracy for {symbol} too low ({accuracy:.1%}). Skipping AI input, relying on technicals/news.")
+            else:
+                ai_pred = predictor.predict(df)
 
     # 3. Strategy signal
     sentiment_score = 0.0
