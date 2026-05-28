@@ -68,12 +68,13 @@ _scheduler_running = False
 _scheduler_thread = None
 _main_loop = None
 _last_telegram_time = 0.0
+_last_training_time = 0.0
 
 
 def _run_scheduler():
     """Background thread running the trading cycle periodically."""
     import time
-    global _scheduler_running, _main_loop, _last_telegram_time
+    global _scheduler_running, _main_loop, _last_telegram_time, _last_training_time
     while _scheduler_running:
         try:
             logger.info("Running trading cycle...")
@@ -101,6 +102,37 @@ def _run_scheduler():
                     logger.info("Telegram portfolio update sent successfully.")
                 else:
                     logger.warning("Telegram update failed, will retry next cycle.")
+
+            # Automatic AI model retraining every N hours
+            retrain_interval_seconds = settings.MODEL_RETRAIN_INTERVAL_HOURS * 3600
+            
+            # Initialize _last_training_time to current time on first startup so it doesn't train immediately on boot
+            if _last_training_time == 0.0:
+                _last_training_time = current_time
+
+            if current_time - _last_training_time >= retrain_interval_seconds:
+                logger.info("Automatic daily AI model retraining triggered...")
+                _last_training_time = current_time
+                from app.notifications import send_telegram_message
+                try:
+                    send_telegram_message("🧠 *Automatic Daily AI Model Retraining Started...*")
+                except Exception:
+                    pass
+                
+                # Run training in background thread
+                def run_training_async():
+                    try:
+                        results = trigger_model_training()
+                        trained_symbols = list(results.keys())
+                        send_telegram_message(f"✅ *Automatic Daily AI Model Retraining Complete!*\nTrained symbols: `{trained_symbols}`")
+                    except Exception as err:
+                        logger.error(f"Failed during automatic model retraining: {err}")
+                        try:
+                            send_telegram_message(f"❌ *Automatic Daily AI Model Retraining Failed:* {err}")
+                        except Exception:
+                            pass
+                
+                threading.Thread(target=run_training_async, daemon=True).start()
         except Exception as e:
             logger.error(f"Scheduler error: {e}")
         time.sleep(300)  # Run every 5 minutes
