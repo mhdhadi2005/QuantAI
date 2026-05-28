@@ -566,11 +566,24 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(_run_telegram_polling())
     logger.info("Background Telegram polling task started")
 
+    # Notify Telegram that server is online
+    from app.notifications import send_telegram_message
+    try:
+        send_telegram_message("🚀 *QuantAI Backend Server is ONLINE*")
+    except Exception as e:
+        logger.error(f"Failed to send startup Telegram alert: {e}")
+
     yield
 
     # Shutdown
     _scheduler_running = False
     logger.info("Application shutting down")
+
+    # Notify Telegram that server is offline
+    try:
+        send_telegram_message("⚠️ *QuantAI Backend Server is OFFLINE (Shutting down)*")
+    except Exception as e:
+        logger.error(f"Failed to send shutdown Telegram alert: {e}")
 
 
 # Create FastAPI app

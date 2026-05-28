@@ -29,11 +29,22 @@ risk_manager = RiskManager()
 
 
 def get_or_create_portfolio(db: Session) -> Portfolio:
-    """Get the main portfolio, or create it with initial capital."""
-    portfolio = db.query(Portfolio).first()
+    """Get the portfolio for the current trading mode, or create it."""
+    mode = settings.TRADING_MODE
+    portfolio = db.query(Portfolio).filter(Portfolio.name == f"Portfolio {mode}").first()
     if not portfolio:
+        # Check if we can rename a legacy 'Main Portfolio' to preserve history
+        legacy_portfolio = db.query(Portfolio).filter(Portfolio.name == "Main Portfolio").first()
+        if legacy_portfolio:
+            legacy_portfolio.name = f"Portfolio {mode}"
+            db.add(legacy_portfolio)
+            db.commit()
+            db.refresh(legacy_portfolio)
+            logger.info(f"Renamed legacy 'Main Portfolio' to '{legacy_portfolio.name}'")
+            return legacy_portfolio
+
         portfolio = Portfolio(
-            name="Main Portfolio",
+            name=f"Portfolio {mode}",
             cash=settings.INITIAL_CAPITAL,
             initial_capital=settings.INITIAL_CAPITAL,
             total_value=settings.INITIAL_CAPITAL,
@@ -43,7 +54,7 @@ def get_or_create_portfolio(db: Session) -> Portfolio:
         db.add(portfolio)
         db.commit()
         db.refresh(portfolio)
-        logger.info(f"Created new portfolio with ${settings.INITIAL_CAPITAL:.2f} initial capital")
+        logger.info(f"Created new portfolio '{portfolio.name}' with ${settings.INITIAL_CAPITAL:.2f} initial capital")
     return portfolio
 
 
