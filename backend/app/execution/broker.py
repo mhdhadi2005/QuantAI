@@ -330,10 +330,13 @@ class AlpacaBroker(BaseBroker):
         try:
             with httpx.Client(timeout=10) as client:
                 response = client.request(method, url, headers=self.headers, json=data)
+                if response.status_code >= 400:
+                    logger.error(f"Alpaca API error response: {response.text}")
+                    return {"error": f"HTTP {response.status_code}: {response.text}"}
                 response.raise_for_status()
                 return response.json()
         except Exception as e:
-            logger.error(f"Alpaca API error: {e}")
+            logger.error(f"Alpaca API request failed: {e}")
             return {"error": str(e)}
 
     def place_order(
@@ -344,23 +347,38 @@ class AlpacaBroker(BaseBroker):
         strategy: str = None, signal_id: int = None,
     ) -> dict:
         """Place order via Alpaca API."""
+        is_bracket = bool(stop_loss or take_profit)
+        
+        if is_bracket:
+            # Alpaca bracket orders do not support fractional shares; qty must be an integer
+            qty_val = int(qty)
+            if qty_val <= 0:
+                logger.warning(f"Canceled bracket order for {symbol} because integer quantity is 0 (float qty: {qty})")
+                return {"success": False, "error": f"Integer quantity is 0 for bracket order (float qty: {qty})"}
+        else:
+            qty_val = round(qty, 4)
+
         payload = {
             "symbol": symbol,
-            "qty": str(round(qty, 4)),
+            "qty": str(qty_val),
             "side": side,
             "type": order_type,
             "time_in_force": "gtc",
         }
 
         if limit_price:
-            payload["limit_price"] = str(limit_price)
-        if stop_loss or take_profit:
+            payload["limit_price"] = f"{limit_price:.2f}"
+        if stop_price:
+            payload["stop_price"] = f"{stop_price:.2f}"
+            
+        if is_bracket:
             payload["order_class"] = "bracket"
             if stop_loss:
-                payload["stop_loss"] = {"stop_price": str(stop_loss)}
+                payload["stop_loss"] = {"stop_price": f"{stop_loss:.2f}"}
             if take_profit:
-                payload["take_profit"] = {"limit_price": str(take_profit)}
+                payload["take_profit"] = {"limit_price": f"{take_profit:.2f}"}
 
+        logger.info(f"Placing Alpaca order for {symbol}: {payload}")
         result = self._request("POST", "/v2/orders", payload)
         if "error" in result:
             return {"success": False, "error": result["error"]}
@@ -370,8 +388,8 @@ class AlpacaBroker(BaseBroker):
             portfolio_id=portfolio.id,
             symbol=symbol,
             side=side,
-            qty=qty,
-            price=float(result.get("filled_avg_price", 0) or 0),
+            qty=float(qty_val),
+            price=float(result.get("filled_avg_price", 0) or result.get("price", 0) or 0),
             order_type=order_type,
             status=result.get("status", "pending"),
             strategy=strategy,
@@ -385,9 +403,68 @@ class AlpacaBroker(BaseBroker):
 
     def get_positions(self, db: Session, portfolio: Portfolio) -> List[dict]:
         result = self._request("GET", "/v2/positions")
-        if isinstance(result, list):
-            return [{"symbol": p["symbol"], "qty": float(p["qty"]), "current_price": float(p["current_price"]), "unrealized_pnl": float(p["unrealized_pl"])} for p in result]
-        return []
+        if not isinstance(result, list):
+            return []
+            
+        alpaca_positions = []
+        active_symbols = set()
+        
+        for p in result:
+            symbol = p["symbol"]
+            qty = float(p["qty"])
+            entry_price = float(p["avg_entry_price"]) if "avg_entry_price" in p else float(p["cost_basis"]) / qty if qty > 0 else 0.0
+            current_price = float(p["current_price"])
+            unrealized_pnl = float(p["unrealized_pl"])
+            unrealized_pnl_pct = float(p["unrealized_plpc"]) if "unrealized_plpc" in p else 0.0
+            
+            active_symbols.add(symbol)
+            
+            # Find existing local position
+            pos = db.query(Position).filter(
+                Position.portfolio_id == portfolio.id,
+                Position.symbol == symbol
+            ).first()
+            
+            if pos:
+                pos.qty = qty
+                pos.entry_price = entry_price
+                pos.current_price = current_price
+                pos.unrealized_pnl = unrealized_pnl
+                pos.unrealized_pnl_pct = unrealized_pnl_pct
+            else:
+                pos = Position(
+                    portfolio_id=portfolio.id,
+                    symbol=symbol,
+                    qty=qty,
+                    entry_price=entry_price,
+                    current_price=current_price,
+                    side="long" if qty > 0 else "short",
+                    unrealized_pnl=unrealized_pnl,
+                    unrealized_pnl_pct=unrealized_pnl_pct,
+                )
+                db.add(pos)
+                
+            alpaca_positions.append({
+                "symbol": symbol,
+                "qty": qty,
+                "entry_price": entry_price,
+                "current_price": current_price,
+                "unrealized_pnl": unrealized_pnl,
+            })
+            
+        # Remove positions that are no longer active in Alpaca
+        db.query(Position).filter(
+            Position.portfolio_id == portfolio.id,
+            ~Position.symbol.in_(active_symbols)
+        ).delete(synchronize_session=False)
+        
+        try:
+            db.commit()
+        except Exception as e:
+            logger.error(f"Error syncing positions in get_positions: {e}")
+            db.rollback()
+            
+        return alpaca_positions
 
     def close_position(self, db: Session, portfolio: Portfolio, position: Position, current_price: float, reason: str = "") -> dict:
         result = self._request("DELETE", f"/v2/positions/{position.symbol}")
@@ -397,10 +474,35 @@ class AlpacaBroker(BaseBroker):
         result = self._request("GET", "/v2/account")
         if "error" in result:
             return {}
+        
+        cash = float(result.get("cash", 0))
+        total_value = float(result.get("portfolio_value", 0))
+        buying_power = float(result.get("buying_power", 0))
+        
+        portfolio.cash = cash
+        portfolio.total_value = total_value
+        portfolio.total_pnl = portfolio.total_value - portfolio.initial_capital
+        if portfolio.initial_capital > 0:
+            portfolio.total_pnl_pct = portfolio.total_pnl / portfolio.initial_capital
+        
+        if portfolio.total_value > portfolio.peak_value:
+            portfolio.peak_value = portfolio.total_value
+        if portfolio.peak_value > 0:
+            portfolio.max_drawdown = min(
+                portfolio.max_drawdown or 0.0,
+                (portfolio.total_value - portfolio.peak_value) / portfolio.peak_value,
+            )
+            
+        db.add(portfolio)
+        try:
+            db.commit()
+        except Exception as e:
+            logger.error(f"Error committing portfolio update in get_account_info: {e}")
+            
         return {
-            "cash": float(result.get("cash", 0)),
-            "total_value": float(result.get("portfolio_value", 0)),
-            "buying_power": float(result.get("buying_power", 0)),
+            "cash": cash,
+            "total_value": total_value,
+            "buying_power": buying_power,
             "mode": "alpaca_paper" if "paper" in self.base_url else "alpaca_live",
         }
 

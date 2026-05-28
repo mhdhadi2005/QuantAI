@@ -69,6 +69,14 @@ def run_trading_cycle(symbols: List[str] = None) -> dict:
     try:
         portfolio = get_or_create_portfolio(db)
 
+        # Sync account balance and positions first to ensure sizing and limits are based on live broker data
+        try:
+            account = broker.get_account_info(db, portfolio)
+            results["account_initial"] = account
+            broker.get_positions(db, portfolio)
+        except Exception as e:
+            logger.error(f"Error syncing account info and positions from broker at start of cycle: {e}")
+
         # Check if trading is halted
         is_allowed, halt_reason = risk_manager.check_daily_loss_limit(portfolio)
         if not is_allowed:
@@ -89,7 +97,7 @@ def run_trading_cycle(symbols: List[str] = None) -> dict:
         # Check stop-losses on all open positions
         _check_stop_losses(db, portfolio, broker)
 
-        # Update account info
+        # Update account info again at end of cycle
         account = broker.get_account_info(db, portfolio)
         results["account"] = account
 
