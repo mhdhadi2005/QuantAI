@@ -211,6 +211,13 @@ class SimulatedBroker(BaseBroker):
             positions_value += pos.current_price * pos.qty
 
         portfolio.total_value = portfolio.cash + positions_value
+        
+        # Align initial capital and daily start value if they are unaligned or at defaults
+        if portfolio.initial_capital == 1000.0 or portfolio.initial_capital < portfolio.total_value / 10:
+            portfolio.initial_capital = portfolio.total_value
+            portfolio.peak_value = portfolio.total_value
+            portfolio.daily_pnl_start_value = portfolio.total_value
+            
         portfolio.total_pnl = portfolio.total_value - portfolio.initial_capital
         portfolio.total_pnl_pct = portfolio.total_pnl / portfolio.initial_capital
 
@@ -219,7 +226,7 @@ class SimulatedBroker(BaseBroker):
             portfolio.peak_value = portfolio.total_value
         if portfolio.peak_value > 0:
             portfolio.max_drawdown = min(
-                portfolio.max_drawdown,
+                portfolio.max_drawdown or 0.0,
                 (portfolio.total_value - portfolio.peak_value) / portfolio.peak_value,
             )
 
@@ -479,11 +486,22 @@ class AlpacaBroker(BaseBroker):
         total_value = float(result.get("portfolio_value", 0))
         buying_power = float(result.get("buying_power", 0))
         
+        # Align initial capital and daily start value if they are unaligned or at defaults
+        if portfolio.initial_capital == 1000.0 or portfolio.initial_capital < total_value / 10:
+            portfolio.initial_capital = total_value
+            portfolio.peak_value = total_value
+            portfolio.daily_pnl_start_value = total_value
+            
         portfolio.cash = cash
         portfolio.total_value = total_value
         portfolio.total_pnl = portfolio.total_value - portfolio.initial_capital
         if portfolio.initial_capital > 0:
             portfolio.total_pnl_pct = portfolio.total_pnl / portfolio.initial_capital
+            
+        # Calculate daily P&L
+        if not portfolio.daily_pnl_start_value or portfolio.daily_pnl_start_value <= 0:
+            portfolio.daily_pnl_start_value = total_value
+        portfolio.daily_pnl = portfolio.total_value - portfolio.daily_pnl_start_value
         
         if portfolio.total_value > portfolio.peak_value:
             portfolio.peak_value = portfolio.total_value
@@ -502,6 +520,13 @@ class AlpacaBroker(BaseBroker):
         return {
             "cash": cash,
             "total_value": total_value,
+            "positions_value": total_value - cash,
+            "total_pnl": portfolio.total_pnl,
+            "total_pnl_pct": portfolio.total_pnl_pct,
+            "daily_pnl": portfolio.daily_pnl,
+            "max_drawdown": portfolio.max_drawdown,
+            "initial_capital": portfolio.initial_capital,
+            "trading_halted": portfolio.trading_halted,
             "buying_power": buying_power,
             "mode": "alpaca_paper" if "paper" in self.base_url else "alpaca_live",
         }
