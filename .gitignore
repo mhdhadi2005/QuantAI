@@ -158,3 +158,8 @@ backend/models_saved/
 *.njsproj
 *.sln
 *.swp
+
+# Paper: cached price data and generated output
+paper/results/ohlcv_*.csv
+paper/paper.html
+paper/*.pdf
