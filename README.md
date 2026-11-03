@@ -119,7 +119,7 @@ The system uses a **Phase 1 ML ensemble** trained on historical OHLCV + indicato
 
 **Features used (all stationary):** RSI, Stochastic RSI, Bollinger %B and width, momentum score, trend flags, MACD / ATR / EMA spread scaled by price, OBV flow, 1/5/10-day returns and lags, realised volatility, volume ratios, and market-index return and trend. Raw prices and moving-average levels are deliberately excluded: tree models cannot extrapolate to price levels they never saw in training.
 
-**Validation:** chronological 80/20 split, **purged** by the 5-bar label horizon. Accuracy is always reported next to the naive baseline (always predicting the majority class) as `baseline_accuracy` and `edge_vs_baseline`, plus AUC. Live trading ignores the model unless it beats that baseline.
+**Validation:** chronological 80/20 split, **purged** by the 5-bar label horizon. Accuracy is always reported next to the naive baseline (always predicting the majority class) as `baseline_accuracy` and `edge_vs_baseline`, plus AUC and the edge's 95% margin of error (`edge_margin_95`). Live trading (and the AI backtest) ignore a model unless its edge is larger than that margin: on a few hundred validation days, a merely positive edge is usually luck. Set `LOOKBACK_DAYS` in `backend/.env` to train on more history and shrink the margin (models train on `LOOKBACK_DAYS × 2` days).
 
 **Training:** Triggered via `POST /api/ai/train` or the "Train All Models" button.  
 **Retraining:** Auto-scheduled every `MODEL_RETRAIN_INTERVAL_HOURS` hours.

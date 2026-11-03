@@ -77,12 +77,19 @@ function DirectionBadge({ direction }) {
 function MetricsRow({ metrics }) {
   if (!metrics) return null;
   // Accuracy means little on its own: "always up" scores well on rising assets
+  // The model is used live only when the edge exceeds its 95% margin of error
   const edge = metrics.edge_vs_baseline;
+  // Older saved models lack edge_margin_95; recompute it as the backend does
+  const margin = metrics.edge_margin_95 ?? (metrics.accuracy != null && metrics.test_samples
+    ? 1.96 * Math.sqrt((metrics.accuracy * (1 - metrics.accuracy)) / metrics.test_samples)
+    : null);
+  const edgeText = edge == null ? '—'
+    : `${edge >= 0 ? '+' : ''}${(edge * 100).toFixed(1)}${margin == null ? '' : ` ±${(margin * 100).toFixed(1)}`} pp`;
   const items = [
     { label: 'Accuracy', value: formatPct(metrics.accuracy) },
     { label: 'Baseline', value: formatPct(metrics.baseline_accuracy) },
-    { label: 'Edge', value: edge == null ? '—' : `${edge >= 0 ? '+' : ''}${(edge * 100).toFixed(1)} pp` },
-    { label: 'F1', value: formatPct(metrics.f1) },
+    { label: 'Edge', value: edgeText },
+    { label: 'Used live', value: edge == null ? '—' : (margin != null && edge > margin ? 'Yes' : 'No') },
   ];
 
   return (
