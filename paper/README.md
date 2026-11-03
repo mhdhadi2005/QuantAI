@@ -1,5 +1,7 @@
 # Where Did the Edge Go?
 
+> **Version 2** is in [`v2/`](v2/): 50 randomly drawn S&P 500 stocks, each evaluation choice changed on its own, a logistic-regression baseline, a properly trained LSTM, a market-relative label, and an evaluation of the fixed QuantAI. Run `python v2/experiment_v2.py` (about 12 minutes on 16 cores), then `python v2/build_paper_v2.py`. This folder holds version 1.
+
 Code for the working paper *Where Did the Edge Go? Leakage, Naive Baselines and Non-Stationary Features in a Machine-Learning Trading Signal* (Mohammed Hadi, November 2026).
 
 The study re-creates QuantAI's original prediction pipeline (the features, XGBoost + LSTM ensemble and 5-day label as they were before the fix in [#1](https://github.com/mhdhadi2005/QuantAI/pull/1)) and scores it three ways on AAPL, MSFT, NVDA, SPY and QQQ:
