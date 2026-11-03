@@ -76,11 +76,13 @@ function DirectionBadge({ direction }) {
 
 function MetricsRow({ metrics }) {
   if (!metrics) return null;
+  // Accuracy means little on its own: "always up" scores well on rising assets
+  const edge = metrics.edge_vs_baseline;
   const items = [
     { label: 'Accuracy', value: formatPct(metrics.accuracy) },
+    { label: 'Baseline', value: formatPct(metrics.baseline_accuracy) },
+    { label: 'Edge', value: edge == null ? '—' : `${edge >= 0 ? '+' : ''}${(edge * 100).toFixed(1)} pp` },
     { label: 'F1', value: formatPct(metrics.f1) },
-    { label: 'Precision', value: formatPct(metrics.precision) },
-    { label: 'Recall', value: formatPct(metrics.recall) },
   ];
 
   return (

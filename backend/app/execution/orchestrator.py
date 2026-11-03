@@ -218,9 +218,15 @@ def _process_symbol(db: Session, portfolio: Portfolio, broker, symbol: str) -> d
     if settings.STRATEGY_AI_ENABLED:
         predictor = get_predictor(symbol)
         if predictor.is_trained:
-            accuracy = predictor.model_metrics.get("accuracy", 0.0)
-            if accuracy < 0.50:
-                logger.info(f"AI Model accuracy for {symbol} too low ({accuracy:.1%}). Skipping AI input, relying on technicals/news.")
+            # Accuracy alone is misleading: on assets that rise most days, "always up" scores
+            # well above 50%. Only use the model if it beats that naive baseline.
+            if not predictor.has_edge():
+                m = predictor.model_metrics
+                logger.info(
+                    f"AI model for {symbol} does not beat the naive baseline "
+                    f"(accuracy {m.get('accuracy', 0.0):.1%} vs baseline {m.get('baseline_accuracy', 0.0):.1%}). "
+                    f"Skipping AI input, relying on technicals/news."
+                )
             else:
                 ai_pred = predictor.predict(df)
 
