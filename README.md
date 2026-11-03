@@ -117,7 +117,9 @@ The system uses a **Phase 1 ML ensemble** trained on historical OHLCV + indicato
 - **XGBoost** (primary, when available)
 - **Random Forest** (fallback)
 
-**Features used:** RSI, MACD, EMA, Stochastic RSI, Bollinger Bands %, ATR, OBV, VWAP, momentum score, volume ratios, 5/10-day returns.
+**Features used (all stationary):** RSI, Stochastic RSI, Bollinger %B and width, momentum score, trend flags, MACD / ATR / EMA spread scaled by price, OBV flow, 1/5/10-day returns and lags, realised volatility, volume ratios, and market-index return and trend. Raw prices and moving-average levels are deliberately excluded: tree models cannot extrapolate to price levels they never saw in training.
+
+**Validation:** chronological 80/20 split, **purged** by the 5-bar label horizon. Accuracy is always reported next to the naive baseline (always predicting the majority class) as `baseline_accuracy` and `edge_vs_baseline`, plus AUC. Live trading ignores the model unless it beats that baseline.
 
 **Training:** Triggered via `POST /api/ai/train` or the "Train All Models" button.  
 **Retraining:** Auto-scheduled every `MODEL_RETRAIN_INTERVAL_HOURS` hours.
@@ -153,8 +155,12 @@ All strategies vote and are **aggregated by weighted confidence scoring**.
 The walk-forward backtesting engine:
 1. Replays historical bars sequentially
 2. Applies strategy rules and risk manager
-3. Simulates fills with slippage (0.01%) and commission (0.1%)
+3. Simulates fills with slippage (0.01%) and commission (0.1%), one bar after the signal
 4. Computes: **Total Return, Sharpe Ratio, Max Drawdown, CAGR, Win Rate, Profit Factor**
+
+With `"use_ai": true` the AI is evaluated **walk-forward**: a fresh model is trained only on bars before the current one and retrained every 63 bars (about a quarter). The saved live model is never used in a backtest, because it may have been trained on bars inside the test window. The response includes an `ai_evaluation` block listing each retrain's edge over the naive baseline.
+
+Why this matters, measured on this codebase's original pipeline: scored on its own training window the model looked 23–35 percentage points better than "always up"; evaluated walk-forward it was 4–10 points *worse*. See the working paper *Where Did the Edge Go?* for details.
 
 Run via the **Backtesting** page in the dashboard or:
 ```bash

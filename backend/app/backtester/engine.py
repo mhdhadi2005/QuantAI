@@ -115,6 +115,9 @@ class BacktestResult:
         if hasattr(self, "individual_results") and self.individual_results:
             data["individual_results"] = self.individual_results
 
+        if hasattr(self, "ai_evaluation"):
+            data["ai_evaluation"] = self.ai_evaluation
+
         return data
 
 
@@ -133,10 +136,14 @@ class BacktestEngine:
         initial_capital: float = 1000.0,
         commission_pct: float = 0.001,  # 0.1%
         slippage_pct: float = 0.0001,
+        ai_retrain_every: int = 63,  # bars between walk-forward retrains (~1 quarter)
+        ai_history_days: int = 5 * 365,  # extra history fetched to train the first AI model
     ):
         self.initial_capital = initial_capital
         self.commission_pct = commission_pct
         self.slippage_pct = slippage_pct
+        self.ai_retrain_every = ai_retrain_every
+        self.ai_history_days = ai_history_days
         self.strategy_engine = StrategyEngine()
         self.risk_manager = RiskManager()
 
@@ -163,7 +170,9 @@ class BacktestEngine:
                 sym_engine = BacktestEngine(
                     initial_capital=symbol_capital,
                     commission_pct=self.commission_pct,
-                    slippage_pct=self.slippage_pct
+                    slippage_pct=self.slippage_pct,
+                    ai_retrain_every=self.ai_retrain_every,
+                    ai_history_days=self.ai_history_days,
                 )
                 sym_res = sym_engine.run(
                     symbol=sym,
@@ -237,17 +246,19 @@ class BacktestEngine:
                 for r in valid_results
             }
         else:
-            # Single symbol path
-            fetch_lookback = lookback_days + 250
-            df = get_ohlcv(symbol, timeframe, fetch_lookback)
-            if df.empty:
+            # Single symbol path. With use_ai, fetch extra history so every AI model can be
+            # trained on data that ends before the bars it is asked to predict.
+            fetch_lookback = lookback_days + 250 + (self.ai_history_days if use_ai else 0)
+            full_df = get_ohlcv(symbol, timeframe, fetch_lookback)
+            if full_df.empty:
                 logger.error(f"No data for {symbol}")
                 return BacktestResult(
                     symbol, self.initial_capital, [self.initial_capital], [], start_date or "", end_date or "", []
                 )
 
-            df = compute_all_indicators(df)
-            df.dropna(inplace=True)
+            full_df = compute_all_indicators(full_df)
+            full_df.dropna(inplace=True)
+            df = full_df
 
             # Filter by date range or keep the last lookback_days
             if start_date:
@@ -263,14 +274,14 @@ class BacktestEngine:
                     symbol, self.initial_capital, [self.initial_capital], [], start_date or "", end_date or "", []
                 )
 
-            # Optionally train AI model
+            # Walk-forward AI. The live model is never used here: it may have been trained on
+            # bars inside this window. Instead a throwaway model is trained on bars strictly
+            # before the current bar and retrained every `ai_retrain_every` bars. Its labels
+            # need closes `horizon` bars ahead, so prepare_features() drops the rows whose
+            # future close lies at or after the current bar.
+            offset = full_df.index.get_loc(df.index[0])
             ai_predictor = None
-            if use_ai:
-                from app.models.predictor import get_predictor
-                ai_predictor = get_predictor(symbol)
-                if not ai_predictor.is_trained:
-                    logger.info(f"Training AI model for {symbol} before backtest...")
-                    ai_predictor.train(df)
+            ai_stats = {"retrains": 0, "retrains_with_edge": 0, "edges": []}
 
             # Initialize state
             cash = self.initial_capital
@@ -282,6 +293,18 @@ class BacktestEngine:
             for i in range(30, len(df)):
                 bar = df.iloc[i]
                 hist = df.iloc[:i]
+
+                if use_ai and (i - 30) % self.ai_retrain_every == 0:
+                    from app.models.predictor import AIPredictor
+                    train_df = full_df.iloc[:offset + i]
+                    if len(train_df) >= 300:
+                        candidate = AIPredictor(symbol, persist=False)
+                        metrics = candidate.train(train_df)
+                        if metrics:
+                            ai_predictor = candidate
+                            ai_stats["retrains"] += 1
+                            ai_stats["retrains_with_edge"] += int(candidate.has_edge())
+                            ai_stats["edges"].append(round(metrics["edge_vs_baseline"], 4))
 
                 close_price = float(bar["close"])
                 atr = float(bar.get("atr_14", close_price * 0.02))
@@ -322,9 +345,10 @@ class BacktestEngine:
 
                 # Generate new signal if no position open
                 if position is None:
+                    # Same gate as live trading: ignore a model that doesn't beat the naive baseline
                     ai_pred = None
-                    if ai_predictor and ai_predictor.is_trained:
-                        ai_pred = ai_predictor.predict(hist)
+                    if ai_predictor and ai_predictor.has_edge():
+                        ai_pred = ai_predictor.predict(full_df.iloc[:offset + i])
 
                     signal = self.strategy_engine.evaluate(hist, symbol, ai_pred)
                     consensus = signal.get("consensus", {})
@@ -386,6 +410,12 @@ class BacktestEngine:
                 end_date=actual_end,
                 dates=dates
             )
+            if use_ai:
+                portfolio_result.ai_evaluation = {
+                    "protocol": "walk-forward: trained only on bars before each period, purged split",
+                    "retrain_every_bars": self.ai_retrain_every,
+                    **ai_stats,
+                }
 
         # Calculate benchmark equity curve
         is_indian = any(".NS" in sym or sym == "^NSEI" for sym in symbols)
