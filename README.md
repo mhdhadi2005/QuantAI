@@ -160,7 +160,7 @@ The walk-forward backtesting engine:
 
 With `"use_ai": true` the AI is evaluated **walk-forward**: a fresh model is trained only on bars before the current one and retrained every 63 bars (about a quarter). The saved live model is never used in a backtest, because it may have been trained on bars inside the test window. The response includes an `ai_evaluation` block listing each retrain's edge over the naive baseline.
 
-Why this matters, measured on this codebase's original pipeline: scored on its own training window the model looked 23–35 percentage points better than "always up"; evaluated walk-forward it was 4–10 points *worse*. See the working paper *Where Did the Edge Go?* for details.
+Why this matters, measured on this codebase's original pipeline: scored on its own training window the model looked 23–35 percentage points better than "always up"; evaluated walk-forward it was 4–10 points *worse*. See the working paper *Where Did the Edge Go?* and its code in [`paper/`](paper/).
 
 Run via the **Backtesting** page in the dashboard or:
 ```bash
