@@ -39,6 +39,17 @@ os.makedirs(MODEL_DIR, exist_ok=True)
 # Bump when the feature set changes so models trained on old features are not loaded
 FEATURE_VERSION = 2
 
+
+def edge_margin(accuracy: float, n_test: int) -> float:
+    """
+    95% margin of error for an accuracy measured on n_test validation days.
+    Overlapping 5-day labels mean fewer independent days than n_test, so this
+    margin is, if anything, too small: treat clearing it as a minimum bar.
+    """
+    if not n_test:
+        return float("inf")
+    return 1.96 * float(np.sqrt(accuracy * (1 - accuracy) / n_test))
+
 # Stationary indicator columns produced by compute_all_indicators()
 FEATURE_COLUMNS = [
     "rsi_14", "stoch_rsi_k", "stoch_rsi_d",
@@ -276,6 +287,7 @@ class AIPredictor:
             "accuracy": accuracy,
             "baseline_accuracy": baseline_accuracy,
             "edge_vs_baseline": accuracy - baseline_accuracy,
+            "edge_margin_95": edge_margin(accuracy, len(X_test)),
             "auc": auc,
             "precision": float(precision_score(y_test, y_pred, zero_division=0)),
             "recall": float(recall_score(y_test, y_pred, zero_division=0)),
@@ -304,14 +316,25 @@ class AIPredictor:
             self._save_model()
         logger.info(
             f"Trained ensemble model for {self.symbol}: accuracy={accuracy:.3f}, "
-            f"baseline={baseline_accuracy:.3f}, edge={accuracy - baseline_accuracy:+.3f}, auc={auc:.3f}"
+            f"baseline={baseline_accuracy:.3f}, edge={accuracy - baseline_accuracy:+.3f} "
+            f"(margin ±{self.model_metrics['edge_margin_95']:.3f}), auc={auc:.3f}, "
+            f"used live: {self.has_edge()}"
         )
         return self.model_metrics
 
     def has_edge(self) -> bool:
-        """True when validation accuracy beats the naive majority-class baseline."""
-        edge = self.model_metrics.get("edge_vs_baseline")
-        return edge is not None and edge > 0
+        """
+        True when validation accuracy beats the naive majority-class baseline by more
+        than its 95% margin of error. A merely positive edge on a few hundred days is
+        usually luck.
+        """
+        m = self.model_metrics
+        edge, n = m.get("edge_vs_baseline"), m.get("test_samples")
+        if edge is None or not n:
+            return False
+        # Models saved before edge_margin_95 existed: recompute it from their metrics
+        margin = m.get("edge_margin_95", edge_margin(m.get("accuracy", 0.5), n))
+        return edge > margin
 
     def predict(self, df: pd.DataFrame) -> dict:
         """

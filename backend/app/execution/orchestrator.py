@@ -219,13 +219,15 @@ def _process_symbol(db: Session, portfolio: Portfolio, broker, symbol: str) -> d
         predictor = get_predictor(symbol)
         if predictor.is_trained:
             # Accuracy alone is misleading: on assets that rise most days, "always up" scores
-            # well above 50%. Only use the model if it beats that naive baseline.
+            # well above 50%. Only use the model if it beats that naive baseline by more
+            # than its margin of error.
             if not predictor.has_edge():
                 m = predictor.model_metrics
                 logger.info(
-                    f"AI model for {symbol} does not beat the naive baseline "
-                    f"(accuracy {m.get('accuracy', 0.0):.1%} vs baseline {m.get('baseline_accuracy', 0.0):.1%}). "
-                    f"Skipping AI input, relying on technicals/news."
+                    f"AI model for {symbol} has no reliable edge over the naive baseline "
+                    f"(accuracy {m.get('accuracy', 0.0):.1%} vs baseline {m.get('baseline_accuracy', 0.0):.1%}, "
+                    f"edge {m.get('edge_vs_baseline', 0.0) * 100:+.1f}pp vs margin "
+                    f"±{m.get('edge_margin_95', 0.0) * 100:.1f}pp). Skipping AI input, relying on technicals/news."
                 )
             else:
                 ai_pred = predictor.predict(df)

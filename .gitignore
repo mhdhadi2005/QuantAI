@@ -163,3 +163,6 @@ backend/models_saved/
 paper/results/ohlcv_*.csv
 paper/paper.html
 paper/*.pdf
+paper/v2/data/
+paper/v2/run_v2.log
+paper/v2/paper_v2.html
