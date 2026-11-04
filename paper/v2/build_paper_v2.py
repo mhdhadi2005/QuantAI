@@ -9,6 +9,11 @@ D = json.load(open(os.path.join(HERE, "results_v2.json")))
 A, P, C = D["aggregate"], D["per_stock"], D["config"]
 U = D["universe"]
 
+# Optional acknowledgements: put the text in acknowledgements.txt next to this file; omitted if absent
+_ack_path = os.path.join(HERE, "acknowledgements.txt")
+_ack_text = open(_ack_path, encoding="utf-8").read().strip() if os.path.exists(_ack_path) else ""
+ACK = f"<h2>Acknowledgements</h2>\n<p>{_ack_text}</p>" if _ack_text else ""
+
 
 def pp(x, sign=True):
     v = round(x * 100, 1) + 0.0
@@ -205,7 +210,7 @@ code {{ font-family: Consolas, monospace; font-size: 9pt; }}
 <h2>8. Conclusion</h2>
 <p>An indicator-based ML ensemble that appears {pp(iso_x['P0_in_sample']['edge']['mean'], False)} points better than a naive baseline when scored on its own training window shows no edge on {C['n_stocks']} randomly chosen stocks once evaluated honestly, whichever model, feature set or label is used. Training on the test window, not label overlap, is what manufactured the apparent skill. The corrected system recognises that it has no edge and keeps the model out of trading, which is the right behaviour for a model without signal.</p>
 
-<p class="todo">[Acknowledgements: add anyone who advised you, and disclose AI assistance if your supervisor or venue requires it.]</p>
+{ACK}
 
 <h2>Reproducibility</h2>
 <p>All results, tables and figures are produced by <code>paper/v2/experiment_v2.py</code> and <code>paper/v2/build_paper_v2.py</code> in the QuantAI repository (Python 3.11; pandas, scikit-learn, XGBoost, PyTorch, yfinance, SciPy). The constituent list used for sampling is saved alongside the code, and all random seeds are fixed.</p>
