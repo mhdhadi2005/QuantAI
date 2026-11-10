@@ -160,7 +160,7 @@ The walk-forward backtesting engine:
 
 With `"use_ai": true` the AI is evaluated **walk-forward**: a fresh model is trained only on bars before the current one and retrained every 63 bars (about a quarter). The saved live model is never used in a backtest, because it may have been trained on bars inside the test window. The response includes an `ai_evaluation` block listing each retrain's edge over the naive baseline.
 
-Why this matters, measured on this codebase's original pipeline: scored on its own training window the model looked 23–35 percentage points better than "always up"; evaluated walk-forward it was 4–10 points *worse*. Version 2 of the working paper repeats this on 50 randomly drawn S&P 500 stocks: [*Where Did the Edge Go?* (PDF)](docs/Hadi_2026_Where_Did_the_Edge_Go_v2.pdf). Code for both versions is in [`paper/`](paper/).
+Why this matters, measured on this codebase's original pipeline: scored on its own training window the model looked 23–35 percentage points better than "always up"; evaluated walk-forward it was 4–10 points *worse*. Version 2 of the working paper repeats this on 50 randomly drawn S&P 500 stocks, and version 3 adds a regularization sweep showing that restricting the models removes their overfitting but still finds no edge: [*Where Did the Edge Go?* v3 (PDF)](docs/Hadi_2026_Where_Did_the_Edge_Go_v3.pdf) (earlier: [v2](docs/Hadi_2026_Where_Did_the_Edge_Go_v2.pdf)). Code for all versions is in [`paper/`](paper/).
 
 Run via the **Backtesting** page in the dashboard or:
 ```bash
